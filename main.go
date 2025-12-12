@@ -5,26 +5,55 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
+
+	"golang.org/x/term"
 )
 
-var version = "0.0.1"
+var version = "0.1.0"
+
+// ANSI color codes
+const (
+	colorReset   = "\033[0m"
+	colorYellow  = "\033[33m"
+	colorBold    = "\033[1m"
+	colorGreen   = "\033[32m"
+	colorMagenta = "\033[35m"
+	colorDim     = "\033[2m"
+)
+
+func useColors() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
 
 func main() {
-	showVersion := flag.Bool("version", false, "print version")
+	showVersion := flag.Bool("v", false, "print version")
+	flag.BoolVar(showVersion, "version", false, "print version")
+
+	findUnused := flag.Bool("u", false, "find unused structs")
+	flag.BoolVar(findUnused, "unused", false, "find unused structs")
+
+	findDuplicate := flag.Bool("d", false, "find duplicate/similar structs")
+	flag.BoolVar(findDuplicate, "duplicate", false, "find duplicate/similar structs")
+
+	minScore := flag.Float64("min-score", 0.5, "minimum similarity score (0.0-1.0) for -d")
+	minFields := flag.Int("min-fields", 2, "minimum fields to consider for -d")
+
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: gounused [flags] [packages]\n\n")
-		fmt.Fprintf(os.Stderr, "Detect unused struct declarations in Go code.\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: gostructs [flags] [packages]\n\n")
+		fmt.Fprintf(os.Stderr, "Analyze struct declarations in Go code.\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  gounused ./...\n")
-		fmt.Fprintf(os.Stderr, "  gounused ./pkg/...\n")
-		fmt.Fprintf(os.Stderr, "  gounused .\n")
+		fmt.Fprintf(os.Stderr, "  gostructs ./...           # run all analyses\n")
+		fmt.Fprintf(os.Stderr, "  gostructs -u ./...        # find unused structs\n")
+		fmt.Fprintf(os.Stderr, "  gostructs -d ./...        # find duplicate structs\n")
+		fmt.Fprintf(os.Stderr, "  gostructs -d -min-score 0.8 ./...\n")
 	}
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("gounused %s\n", version)
+		fmt.Printf("gostructs %s\n", version)
 		os.Exit(0)
 	}
 
@@ -33,14 +62,45 @@ func main() {
 		patterns = []string{"./..."}
 	}
 
+	// Default: run all if no flags specified
+	runAll := !*findUnused && !*findDuplicate
+	if runAll {
+		*findUnused = true
+		*findDuplicate = true
+	}
+
+	exitCode := 0
+
+	if *findUnused {
+		code := runUnusedAnalysis(patterns)
+		if code > exitCode {
+			exitCode = code
+		}
+	}
+
+	if *findDuplicate {
+		opts := SimilarityOptions{
+			MinFields:          *minFields,
+			MinSimilarityScore: *minScore,
+		}
+		code := runDuplicateAnalysis(patterns, opts)
+		if code > exitCode {
+			exitCode = code
+		}
+	}
+
+	os.Exit(exitCode)
+}
+
+func runUnusedAnalysis(patterns []string) int {
 	unused, err := Analyze(patterns)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 
 	if len(unused) == 0 {
-		os.Exit(0)
+		return 0
 	}
 
 	sort.Slice(unused, func(i, j int) bool {
@@ -50,9 +110,126 @@ func main() {
 		return unused[i].Position.Line < unused[j].Position.Line
 	})
 
+	colored := useColors()
 	for _, u := range unused {
-		fmt.Printf("%s: struct %s is unused\n", u.Position, u.Name)
+		if colored {
+			fmt.Printf("%s: struct %s%s%s is unused\n",
+				u.Position,
+				colorBold+colorYellow, u.Name, colorReset)
+		} else {
+			fmt.Printf("%s: struct %s is unused\n", u.Position, u.Name)
+		}
 	}
 
-	os.Exit(1)
+	return 1
+}
+
+func runDuplicateAnalysis(patterns []string, opts SimilarityOptions) int {
+	results, err := FindSimilarStructs(patterns, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+
+	if len(results) == 0 {
+		return 0
+	}
+
+	printSimilarityResults(results)
+	return 1
+}
+
+func printSimilarityResults(results []SimilarityResult) {
+	colored := useColors()
+
+	for i, r := range results {
+		if i > 0 {
+			fmt.Println()
+		}
+
+		typeStr := similarityTypeString(r.Type)
+		scoreStr := fmt.Sprintf("%.0f%%", r.Score*100)
+
+		if colored {
+			fmt.Printf("%s%s%s %s(%s)%s\n",
+				colorBold, typeStr, colorReset,
+				colorDim, scoreStr, colorReset)
+		} else {
+			fmt.Printf("%s (%s)\n", typeStr, scoreStr)
+		}
+
+		printStructLocation(r.StructA, colored, "  ")
+		printStructLocation(r.StructB, colored, "  ")
+
+		if len(r.CommonFields) > 0 {
+			if colored {
+				fmt.Printf("  %scommon:%s %s\n",
+					colorGreen, colorReset,
+					strings.Join(r.CommonFields, ", "))
+			} else {
+				fmt.Printf("  common: %s\n", strings.Join(r.CommonFields, ", "))
+			}
+		}
+
+		if len(r.TypeMismatches) > 0 {
+			if colored {
+				fmt.Printf("  %stype mismatches:%s\n", colorYellow, colorReset)
+			} else {
+				fmt.Println("  type mismatches:")
+			}
+			for _, tm := range r.TypeMismatches {
+				fmt.Printf("    %s: %s vs %s\n", tm.FieldName, tm.TypeInA, tm.TypeInB)
+			}
+		}
+
+		if r.Type == Subset {
+			printSubsetSuggestion(r, colored)
+		}
+	}
+
+	fmt.Printf("\nFound %d similar struct pair(s)\n", len(results))
+}
+
+func printStructLocation(s StructInfo, colored bool, indent string) {
+	if colored {
+		fmt.Printf("%s%s%s%s %s(%d fields)%s\n",
+			indent,
+			colorBold+colorYellow, s.Name, colorReset,
+			colorDim, len(s.Fields), colorReset)
+		fmt.Printf("%s  %s%s%s\n", indent, colorDim, s.Position, colorReset)
+	} else {
+		fmt.Printf("%s%s (%d fields)\n", indent, s.Name, len(s.Fields))
+		fmt.Printf("%s  %s\n", indent, s.Position)
+	}
+}
+
+func printSubsetSuggestion(r SimilarityResult, colored bool) {
+	smaller, larger := r.StructA, r.StructB
+	if len(r.OnlyInA) > 0 {
+		smaller, larger = r.StructB, r.StructA
+	}
+
+	if colored {
+		fmt.Printf("  %ssuggestion:%s embed %s in %s\n",
+			colorMagenta, colorReset, smaller.Name, larger.Name)
+	} else {
+		fmt.Printf("  suggestion: embed %s in %s\n", smaller.Name, larger.Name)
+	}
+}
+
+func similarityTypeString(t SimilarityType) string {
+	switch t {
+	case Duplicate:
+		return "DUPLICATE"
+	case NearDuplicate:
+		return "NEAR DUPLICATE"
+	case Subset:
+		return "SUBSET"
+	case SameNames:
+		return "SAME NAMES"
+	case Mergeable:
+		return "MERGEABLE"
+	default:
+		return "SIMILAR"
+	}
 }

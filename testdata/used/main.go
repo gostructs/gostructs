@@ -46,8 +46,8 @@ type MapValue struct{ M int }
 // ChanType - used in channel
 type ChanType struct{ Ch int }
 
-func takeParam(p FuncParam)   {}
-func returnVal() FuncReturn   { return FuncReturn{} }
+func takeParam(p FuncParam) {}
+func returnVal() FuncReturn { return FuncReturn{} }
 
 func main() {
 	var _ VarDecl
