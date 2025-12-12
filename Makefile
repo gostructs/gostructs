@@ -51,4 +51,22 @@ test:
 	@printf "$(CYAN)*** Running tests…$(NC)\n"
 	@go test -v ./...
 
-.PHONY: check install-checks ver-checks test
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1")
+NEXT_VERSION ?= $(VERSION)
+
+release:
+	@if [ -z "$(v)" ]; then \
+		printf "$(RED)Usage: make release v=X.Y.Z$(NC)\n"; \
+		exit 1; \
+	fi
+	@printf "$(CYAN)*** Creating release v$(v)…$(NC)\n"
+	@git diff --quiet || { printf "$(RED)Uncommitted changes. Commit first.$(NC)\n"; exit 1; }
+	@git tag -a v$(v) -m "Release v$(v)"
+	@git push origin v$(v)
+	@printf "$(GREEN)*** Tag v$(v) pushed! Creating GitHub release…$(NC)\n"
+	@gh release create v$(v) --title "v$(v)" --generate-notes
+	@printf "$(GREEN)*** Release v$(v) created!$(NC)\n"
+	@printf "$(CYAN)*** SHA256:$(NC)\n"
+	@curl -sL https://github.com/afify/gostructs/archive/refs/tags/v$(v).tar.gz | shasum -a 256
+
+.PHONY: check install-checks ver-checks test release
