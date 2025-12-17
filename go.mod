@@ -1,4 +1,4 @@
-module github.com/afify/gostructs
+module github.com/gostructs/gostructs
 
 go 1.25.5
 

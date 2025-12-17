@@ -8,11 +8,22 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
 )
+
+// isGeneratedFile returns true if the filename matches generated file patterns
+func isGeneratedFile(filename string) bool {
+	base := filepath.Base(filename)
+	return strings.HasSuffix(base, ".pb.go") ||
+		strings.HasSuffix(base, "_gen.go") ||
+		strings.HasSuffix(base, "_generated.go") ||
+		strings.HasSuffix(base, "_string.go") ||
+		strings.HasSuffix(base, "_enumer.go")
+}
 
 type StructLocation struct {
 	Name     string
@@ -103,6 +114,10 @@ func newGraph() *graph {
 
 func (g *graph) collectDeclarations(pkg *packages.Package) {
 	for _, file := range pkg.Syntax {
+		filename := pkg.Fset.Position(file.Pos()).Filename
+		if isGeneratedFile(filename) {
+			continue
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch decl := n.(type) {
 			case *ast.TypeSpec:
@@ -152,6 +167,10 @@ func (g *graph) collectDeclarations(pkg *packages.Package) {
 
 func (g *graph) collectUsages(pkg *packages.Package) {
 	for _, file := range pkg.Syntax {
+		filename := pkg.Fset.Position(file.Pos()).Filename
+		if isGeneratedFile(filename) {
+			continue
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch decl := n.(type) {
 			case *ast.FuncDecl:
@@ -242,6 +261,10 @@ func getReceiverType(expr ast.Expr) *ast.Ident {
 
 func (g *graph) findEntryPoints(pkg *packages.Package) {
 	for _, file := range pkg.Syntax {
+		filename := pkg.Fset.Position(file.Pos()).Filename
+		if isGeneratedFile(filename) {
+			continue
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			funcDecl, ok := n.(*ast.FuncDecl)
 			if !ok || funcDecl.Name == nil {
@@ -260,6 +283,10 @@ func (g *graph) findEntryPoints(pkg *packages.Package) {
 	}
 
 	for _, file := range pkg.Syntax {
+		filename := pkg.Fset.Position(file.Pos()).Filename
+		if isGeneratedFile(filename) {
+			continue
+		}
 		for _, decl := range file.Decls {
 			genDecl, ok := decl.(*ast.GenDecl)
 			if !ok {
@@ -419,6 +446,10 @@ func collectStructInfos(pkg *packages.Package) []StructInfo {
 	var structs []StructInfo
 
 	for _, file := range pkg.Syntax {
+		filename := pkg.Fset.Position(file.Pos()).Filename
+		if isGeneratedFile(filename) {
+			continue
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			typeSpec, ok := n.(*ast.TypeSpec)
 			if !ok {

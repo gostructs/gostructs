@@ -10,7 +10,7 @@ import (
 	"golang.org/x/term"
 )
 
-var version = "0.1.0"
+var version = "0.0.2"
 
 // ANSI color codes
 const (
@@ -35,6 +35,12 @@ func main() {
 
 	findDuplicate := flag.Bool("d", false, "find duplicate/similar structs")
 	flag.BoolVar(findDuplicate, "duplicate", false, "find duplicate/similar structs")
+
+	jsonOutput := flag.Bool("j", false, "output in JSON format")
+	flag.BoolVar(jsonOutput, "json", false, "output in JSON format")
+
+	findTags := flag.Bool("t", false, "validate struct tags")
+	flag.BoolVar(findTags, "tags", false, "validate struct tags")
 
 	minScore := flag.Float64("min-score", 0.5, "minimum similarity score (0.0-1.0) for -d")
 	minFields := flag.Int("min-fields", 2, "minimum fields to consider for -d")
@@ -63,18 +69,23 @@ func main() {
 	}
 
 	// Default: run all if no flags specified
-	runAll := !*findUnused && !*findDuplicate
+	runAll := !*findUnused && !*findDuplicate && !*findTags
 	if runAll {
 		*findUnused = true
 		*findDuplicate = true
+		*findTags = true
 	}
 
+	var allDiagnostics []Diagnostic
 	exitCode := 0
 
 	if *findUnused {
-		code := runUnusedAnalysis(patterns)
+		unused, code := runUnusedAnalysis(patterns, *jsonOutput)
 		if code > exitCode {
 			exitCode = code
+		}
+		if *jsonOutput {
+			allDiagnostics = append(allDiagnostics, UnusedToDiagnostics(unused)...)
 		}
 	}
 
@@ -83,24 +94,44 @@ func main() {
 			MinFields:          *minFields,
 			MinSimilarityScore: *minScore,
 		}
-		code := runDuplicateAnalysis(patterns, opts)
+		results, code := runDuplicateAnalysis(patterns, opts, *jsonOutput)
 		if code > exitCode {
 			exitCode = code
+		}
+		if *jsonOutput {
+			allDiagnostics = append(allDiagnostics, SimilarityToDiagnostics(results)...)
+		}
+	}
+
+	if *findTags {
+		issues, code := runTagAnalysis(patterns, *jsonOutput)
+		if code > exitCode {
+			exitCode = code
+		}
+		if *jsonOutput {
+			allDiagnostics = append(allDiagnostics, TagsToDiagnostics(issues)...)
+		}
+	}
+
+	if *jsonOutput {
+		if err := WriteJSON(os.Stdout, allDiagnostics, version); err != nil {
+			fmt.Fprintf(os.Stderr, "error writing JSON: %v\n", err)
+			os.Exit(2)
 		}
 	}
 
 	os.Exit(exitCode)
 }
 
-func runUnusedAnalysis(patterns []string) int {
+func runUnusedAnalysis(patterns []string, jsonOutput bool) ([]UnusedStruct, int) {
 	unused, err := Analyze(patterns)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 2
+		return nil, 2
 	}
 
 	if len(unused) == 0 {
-		return 0
+		return unused, 0
 	}
 
 	sort.Slice(unused, func(i, j int) bool {
@@ -110,33 +141,76 @@ func runUnusedAnalysis(patterns []string) int {
 		return unused[i].Position.Line < unused[j].Position.Line
 	})
 
-	colored := useColors()
-	for _, u := range unused {
-		if colored {
-			fmt.Printf("%s: struct %s%s%s is unused\n",
-				u.Position,
-				colorBold+colorYellow, u.Name, colorReset)
-		} else {
-			fmt.Printf("%s: struct %s is unused\n", u.Position, u.Name)
+	if !jsonOutput {
+		colored := useColors()
+		for _, u := range unused {
+			if colored {
+				fmt.Printf("%s: struct %s%s%s is unused\n",
+					u.Position,
+					colorBold+colorYellow, u.Name, colorReset)
+			} else {
+				fmt.Printf("%s: struct %s is unused\n", u.Position, u.Name)
+			}
 		}
 	}
 
-	return 1
+	return unused, 1
 }
 
-func runDuplicateAnalysis(patterns []string, opts SimilarityOptions) int {
+func runDuplicateAnalysis(patterns []string, opts SimilarityOptions, jsonOutput bool) ([]SimilarityResult, int) {
 	results, err := FindSimilarStructs(patterns, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 2
+		return nil, 2
 	}
 
 	if len(results) == 0 {
-		return 0
+		return results, 0
 	}
 
-	printSimilarityResults(results)
-	return 1
+	if !jsonOutput {
+		printSimilarityResults(results)
+	}
+
+	return results, 1
+}
+
+func runTagAnalysis(patterns []string, jsonOutput bool) ([]TagIssue, int) {
+	issues, err := ValidateTags(patterns)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return nil, 2
+	}
+
+	if len(issues) == 0 {
+		return issues, 0
+	}
+
+	if !jsonOutput {
+		printTagIssues(issues)
+	}
+
+	return issues, 1
+}
+
+func printTagIssues(issues []TagIssue) {
+	colored := useColors()
+
+	for _, issue := range issues {
+		if colored {
+			fmt.Printf("%s: %s.%s: %s%s%s\n",
+				issue.Position,
+				issue.StructName,
+				issue.FieldName,
+				colorBold+colorYellow, issue.Message, colorReset)
+		} else {
+			fmt.Printf("%s: %s.%s: %s\n",
+				issue.Position,
+				issue.StructName,
+				issue.FieldName,
+				issue.Message)
+		}
+	}
 }
 
 func printSimilarityResults(results []SimilarityResult) {

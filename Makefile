@@ -67,6 +67,6 @@ release:
 	@gh release create v$(v) --title "v$(v)" --generate-notes
 	@printf "$(GREEN)*** Release v$(v) created!$(NC)\n"
 	@printf "$(CYAN)*** SHA256:$(NC)\n"
-	@curl -sL https://github.com/afify/gostructs/archive/refs/tags/v$(v).tar.gz | shasum -a 256
+	@curl -sL https://github.com/gostructs/gostructs/archive/refs/tags/v$(v).tar.gz | shasum -a 256
 
 .PHONY: check install-checks ver-checks test release
