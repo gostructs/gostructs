@@ -42,6 +42,9 @@ func main() {
 	findTags := flag.Bool("t", false, "validate struct tags")
 	flag.BoolVar(findTags, "tags", false, "validate struct tags")
 
+	warnOnly := flag.Bool("w", false, "warn only, don't exit 1 on findings")
+	flag.BoolVar(warnOnly, "warn", false, "warn only, don't exit 1 on findings")
+
 	minScore := flag.Float64("min-score", 0.5, "minimum similarity score (0.0-1.0) for -d")
 	minFields := flag.Int("min-fields", 2, "minimum fields to consider for -d")
 
@@ -118,6 +121,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error writing JSON: %v\n", err)
 			os.Exit(2)
 		}
+	}
+
+	if *warnOnly && exitCode == 1 {
+		exitCode = 0
 	}
 
 	os.Exit(exitCode)
