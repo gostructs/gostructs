@@ -272,8 +272,10 @@ func (g *graph) findEntryPoints(pkg *packages.Package) {
 			}
 
 			name := funcDecl.Name.Name
-			// Entry points: main, init, and any exported function
-			if name == "main" || name == "init" {
+			// Entry points: main, init, and exported functions in non-main packages
+			isEntryPoint := name == "main" || name == "init" ||
+				(pkg.Name != "main" && ast.IsExported(name))
+			if isEntryPoint {
 				if obj := pkg.TypesInfo.Defs[funcDecl.Name]; obj != nil {
 					g.entryPoints = append(g.entryPoints, obj)
 				}
