@@ -271,39 +271,54 @@ func isValidTagKey(key string) bool {
 	return true
 }
 
+var tagOpts = map[string]map[string]bool{
+	"json": {
+		"omitempty": true,
+		"string":    true,
+	},
+	"xml": {
+		"omitempty": true,
+		"attr":      true,
+		"chardata":  true,
+		"innerxml":  true,
+		"comment":   true,
+		"any":       true,
+		"cdata":     true,
+	},
+	"yaml": {
+		"omitempty": true,
+		"inline":    true,
+		"flow":      true,
+	},
+	"toml": {
+		"omitempty": true,
+		"inline":    true,
+	},
+}
+
 func validateTagOptions(structName, fieldName string, pos token.Position, key, value string) []TagIssue {
 	var issues []TagIssue
 
-	switch key {
-	case "json", "xml", "yaml", "toml":
-		parts := strings.Split(value, ",")
-		for i, part := range parts {
-			if i == 0 {
-				continue // First part is the field name
-			}
-			part = strings.TrimSpace(part)
-			validOptions := map[string]bool{
-				"omitempty": true,
-				"string":    true,
-				"inline":    true, // yaml/toml
-				"flow":      true, // yaml
-			}
-			if key == "json" {
-				validOptions = map[string]bool{
-					"omitempty": true,
-					"string":    true,
-				}
-			}
-			if part != "" && !validOptions[part] && part != "-" {
-				issues = append(issues, TagIssue{
-					StructName: structName,
-					FieldName:  fieldName,
-					Position:   pos,
-					Type:       TagUnknownOption,
-					Tag:        key,
-					Message:    fmt.Sprintf("unknown option %q for %s tag", part, key),
-				})
-			}
+	opts, ok := tagOpts[key]
+	if !ok {
+		return issues
+	}
+
+	parts := strings.Split(value, ",")
+	for i, part := range parts {
+		if i == 0 {
+			continue
+		}
+		part = strings.TrimSpace(part)
+		if part != "" && !opts[part] && part != "-" {
+			issues = append(issues, TagIssue{
+				StructName: structName,
+				FieldName:  fieldName,
+				Position:   pos,
+				Type:       TagUnknownOption,
+				Tag:        key,
+				Message:    fmt.Sprintf("unknown option %q for %s tag", part, key),
+			})
 		}
 	}
 

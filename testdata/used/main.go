@@ -46,8 +46,25 @@ type MapValue struct{ M int }
 // ChanType - used in channel
 type ChanType struct{ Ch int }
 
+// GenericArg - used as generic type argument
+type GenericArg struct{ G int }
+
+// GenericMulti - used as one of multiple type args
+type GenericMulti struct{ GM int }
+
 func takeParam(p FuncParam) {}
 func returnVal() FuncReturn { return FuncReturn{} }
+
+func Process[T any]() T {
+	var zero T
+	return zero
+}
+
+func Multi[A, B any]() (A, B) {
+	var a A
+	var b B
+	return a, b
+}
 
 func main() {
 	var _ VarDecl
@@ -64,4 +81,7 @@ func main() {
 	_ = []SliceType{}
 	_ = map[MapKey]MapValue{}
 	_ = make(chan ChanType)
+
+	_ = Process[GenericArg]()
+	_, _ = Multi[GenericArg, GenericMulti]()
 }

@@ -343,11 +343,17 @@ type StructField struct {
 	Embedded bool
 }
 
+// FieldSignature combines type and tag for field comparison
+type FieldSignature struct {
+	TypeName string
+	Tag      string
+}
+
 // StructInfo holds all information about a struct for similarity analysis
 type StructInfo struct {
 	StructLocation
 	Fields   []StructField
-	FieldSet map[string]string // fieldName -> typeName
+	FieldSet map[string]FieldSignature // fieldName -> signature
 }
 
 // SimilarityType categorizes the kind of similarity found
@@ -468,7 +474,7 @@ func collectStructInfos(pkg *packages.Package) []StructInfo {
 					Name:     typeSpec.Name.Name,
 					Position: pkg.Fset.Position(typeSpec.Name.Pos()),
 				},
-				FieldSet: make(map[string]string),
+				FieldSet: make(map[string]FieldSignature),
 			}
 
 			if structType.Fields != nil {
@@ -488,7 +494,7 @@ func collectStructInfos(pkg *packages.Package) []StructInfo {
 							Embedded: true,
 						}
 						info.Fields = append(info.Fields, sf)
-						info.FieldSet[typeName] = typeName
+						info.FieldSet[typeName] = FieldSignature{TypeName: typeName, Tag: tag}
 					} else {
 						for _, ident := range field.Names {
 							sf := StructField{
@@ -498,7 +504,7 @@ func collectStructInfos(pkg *packages.Package) []StructInfo {
 								Embedded: false,
 							}
 							info.Fields = append(info.Fields, sf)
-							info.FieldSet[ident.Name] = typeName
+							info.FieldSet[ident.Name] = FieldSignature{TypeName: typeName, Tag: tag}
 						}
 					}
 				}
@@ -552,14 +558,15 @@ func compareStructs(a, b *StructInfo) *SimilarityResult {
 	}
 
 	// Find common fields and differences
-	for fieldName, typeA := range a.FieldSet {
-		if typeB, exists := b.FieldSet[fieldName]; exists {
+	for fieldName, sigA := range a.FieldSet {
+		if sigB, exists := b.FieldSet[fieldName]; exists {
 			result.CommonFields = append(result.CommonFields, fieldName)
-			if typeA != typeB {
+			// Compare both type and tag
+			if sigA != sigB {
 				result.TypeMismatches = append(result.TypeMismatches, FieldTypeMismatch{
 					FieldName: fieldName,
-					TypeInA:   typeA,
-					TypeInB:   typeB,
+					TypeInA:   sigA.TypeName,
+					TypeInB:   sigB.TypeName,
 				})
 			}
 		} else {
